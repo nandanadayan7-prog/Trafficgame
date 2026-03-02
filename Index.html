@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Traffic Rule Racer - Signal Pro</title>
+    <style>
+        :root {
+            --bg-color: #27ae60;
+            --road-color: #2c3e50;
+            --ui-bg: rgba(255, 255, 255, 0.9);
+        }
+
+        body { margin: 0; overflow: hidden; font-family: sans-serif; background: var(--bg-color); touch-action: none; }
+        
+        #top-ui {
+            position: absolute; top: 10px; width: 95%; left: 2.5%; height: 50px;
+            background: var(--ui-bg); border-radius: 10px; display: flex;
+            justify-content: space-around; align-items: center; z-index: 10;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+
+        .stat { font-weight: bold; color: #333; font-size: 14px; }
+        .stat span { display: block; font-size: 10px; color: #666; text-transform: uppercase; }
+
+        #signal-hud {
+            width: 20px; height: 20px; border-radius: 50%; border: 2px solid #333;
+        }
+
+        #controls {
+            position: absolute; bottom: 20px; width: 100%; display: flex;
+            justify-content: space-between; padding: 0 20px; box-sizing: border-box; z-index: 10;
+        }
+
+        .btn-box { display: flex; gap: 10px; }
+        .btn {
+            width: 70px; height: 70px; background: rgba(255,255,255,0.3);
+            border: 2px solid white; border-radius: 15px; display: flex;
+            align-items: center; justify-content: center; font-weight: bold;
+            color: white; backdrop-filter: blur(5px); user-select: none;
+        }
+        .btn:active { background: white; color: black; }
+
+        .overlay {
+            position: absolute; top:0; left:0; width:100%; height:100%;
+            background: rgba(0,0,0,0.85); display: none; z-index: 100;
+            flex-direction: column; align-items: center; justify-content: center; color: white;
+        }
+        .q-card { background: white; color: #333; padding: 20px; border-radius: 15px; width: 80%; max-width: 350px; }
+        .opt-btn { width: 100%; padding: 10px; margin: 5px 0; border: none; background: #3498db; color: white; border-radius: 5px; cursor: pointer; }
+
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+
+<div id="top-ui">
+    <div class="stat"><span>Score</span><div id="score">0</div></div>
+    <div class="stat"><span>Speed</span><div id="speed">0</div></div>
+    <div class="stat"><span>Mistakes</span><div id="mistakes">0/3</div></div>
+    <div class="stat"><span>Signal</span><div id="signal-hud"></div></div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="controls">
+    <div class="btn-box">
+        <div class="btn" id="left">L</div>
+        <div class="btn" id="right">R</div>
+    </div>
+    <div class="btn-box">
+        <div class="btn" id="brake" style="background: rgba(231, 76, 60, 0.4);">STOP</div>
+        <div class="btn" id="gas" style="background: rgba(46, 204, 113, 0.4);">GO</div>
+    </div>
+</div>
+
+<div id="q-overlay" class="overlay">
+    <div class="q-card">
+        <h3 id="q-text">Question</h3>
+        <div id="opts"></div>
+    </div>
+</div>
+
+<div id="over-overlay" class="overlay">
+    <h1>GAME OVER</h1>
+    <button class="opt-btn" onclick="location.reload()">RESTART</button>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const roadWidth = 260;
+const speedLimit = 60;
+
+let state = {
+    score: 0, speed: 0, mistakes: 0, dist: 0, lastSpawn: 0,
+    carX: 0, carY: 0, targetSpeed: 0, paused: false,
+    objects: [], inputs: { L: false, R: false, G: false, B: false }
+};
+
+const questions = [
+    { q: "What do you do at a Red light?", a: ["Stop", "Speed up", "Slowly roll"], c: 0 },
+    { q: "A Yellow light means...", a: ["Go faster", "Prepare to stop", "Maintain speed"], c: 1 }
+];
+
+function init() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    state.carX = canvas.width / 2;
+    state.carY = canvas.height - 150;
+    loop();
+}
+
+function spawn() {
+    if (state.dist - state.lastSpawn < 800) return;
+    const isLight = Math.random() > 0.4;
+    const obj = {
+        type: isLight ? 'LIGHT' : 'PED',
+        y: -100, x: canvas.width/2,
+        passed: false, checked: false
+    };
+    if(isLight) { obj.timer = 0; obj.light = 'GREEN'; }
+    else { obj.px = (canvas.width - roadWidth)/2 - 30; }
+    
+    state.objects.push(obj);
+    state.lastSpawn = state.dist;
+}
+
+function loop() {
+    if (state.paused) return;
+
+    // Physics
+    if (state.inputs.G) state.targetSpeed = 80;
+    else if (state.inputs.B) state.targetSpeed = 0;
+    else state.targetSpeed = 35;
+
+    state.speed += (state.targetSpeed - state.speed) * 0.05;
+    state.dist += state.speed * 0.1;
+
+    if (state.inputs.L) state.carX -= 5;
+    if (state.inputs.R) state.carX += 5;
+
+    // Constraints
+    const edge = (canvas.width - roadWidth)/2;
+    state.carX = Math.max(edge+20, Math.min(edge+roadWidth-20, state.carX));
+
+    // UI
+    document.getElementById('score').innerText = Math.floor(state.score);
+    document.getElementById('speed').innerText = Math.floor(state.speed) + " km/h";
+    document.getElementById('mistakes').innerText = state.mistakes + "/3";
+
+    spawn();
+    updateObjects();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+function updateObjects() {
+    state.objects.forEach(o => {
+        o.y += state.speed * 0.1;
+
+        if (o.type === 'LIGHT') {
+            o.timer++;
+            // Signal Logic: Green(200) -> Yellow(120) -> Red(250)
+            if (o.timer < 200) o.light = 'GREEN';
+            else if (o.timer < 320) o.light = 'YELLOW';
+            else if (o.timer < 570) o.light = 'RED';
+            else o.timer = 0;
+
+            document.getElementById('signal-hud').style.background = 
+                o.light === 'RED' ? '#e74c3c' : (o.light === 'YELLOW' ? '#f1c40f' : '#2ecc71');
+
+            // Collision with Stop Line (y+60)
+            if (o.light === 'RED' && !o.checked && state.carY < o.y+80 && state.carY > o.y+40) {
+                if (state.speed > 5) {
+                    fail("Ran Red Light!");
+                    o.checked = true;
+                }
+            }
+        }
+
+        if (o.type === 'PED') {
+            if (state.carY - o.y < 400) o.px += 2;
+            if (Math.abs(state.carY - o.y) < 50 && state.speed > 5 && o.px > (canvas.width-roadWidth)/2 && o.px < (canvas.width+roadWidth)/2) {
+                if(!o.checked) fail("Yield to Pedestrian!");
+                o.checked = true;
+            }
+            if (Math.abs(state.carY - o.y) < 30 && Math.abs(state.carX - o.px) < 25) {
+                endGame();
+            }
+        }
+
+        if (o.y > state.carY + 50 && !o.passed) {
+            if(!o.checked) state.score += 20;
+            o.passed = true;
+        }
+    });
+    state.objects = state.objects.filter(o => o.y < canvas.height + 100);
+}
+
+function fail(msg) {
+    state.mistakes++;
+    if (state.mistakes >= 3) showQ();
+}
+
+function showQ() {
+    state.paused = true;
+    const q = questions[Math.floor(Math.random()*questions.length)];
+    document.getElementById('q-text').innerText = q.q;
+    const div = document.getElementById('opts');
+    div.innerHTML = '';
+    q.a.forEach((opt, i) => {
+        const b = document.createElement('button');
+        b.className = 'opt-btn';
+        b.innerText = opt;
+        b.onclick = () => {
+            if(i === q.c) {
+                state.mistakes = 0; state.paused = false;
+                document.getElementById('q-overlay').style.display = 'none';
+                loop();
+            } else { endGame(); }
+        };
+        div.appendChild(b);
+    });
+    document.getElementById('q-overlay').style.display = 'flex';
+}
+
+function endGame() {
+    state.paused = true;
+    document.getElementById('over-overlay').style.display = 'flex';
+}
+
+function draw() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const mid = canvas.width/2;
+    
+    // Road
+    ctx.fillStyle = '#34495e';
+    ctx.fillRect(mid - roadWidth/2, 0, roadWidth, canvas.height);
+    
+    // Lane lines
+    ctx.strokeStyle = 'white'; ctx.setLineDash([20, 20]);
+    ctx.beginPath(); ctx.moveTo(mid, 0); ctx.lineTo(mid, canvas.height); ctx.stroke();
+
+    state.objects.forEach(o => {
+        if(o.type === 'LIGHT') {
+            // Stop Line
+            ctx.fillStyle = 'white'; ctx.fillRect(mid-roadWidth/2, o.y+60, roadWidth, 10);
+            // Post
+            ctx.fillStyle = '#222'; ctx.fillRect(mid+roadWidth/2+5, o.y-40, 20, 80);
+            // Light colors
+            ctx.fillStyle = o.light === 'RED' ? '#ff0000' : '#440000';
+            ctx.beginPath(); ctx.arc(mid+roadWidth/2+15, o.y-25, 6, 0, 7); ctx.fill();
+            ctx.fillStyle = o.light === 'YELLOW' ? '#ffff00' : '#444400';
+            ctx.beginPath(); ctx.arc(mid+roadWidth/2+15, o.y, 6, 0, 7); ctx.fill();
+            ctx.fillStyle = o.light === 'GREEN' ? '#00ff00' : '#004400';
+            ctx.beginPath(); ctx.arc(mid+roadWidth/2+15, o.y+25, 6, 0, 7); ctx.fill();
+        } else {
+            // Zebra
+            ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            for(let i=0; i<5; i++) ctx.fillRect(mid-roadWidth/2 + i*55, o.y, 35, 80);
+            // Ped
+            ctx.fillStyle = '#f39c12';
+            ctx.beginPath(); ctx.arc(o.px, o.y+40, 10, 0, 7); ctx.fill();
+        }
+    });
+
+    // Car
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(state.carX-15, state.carY-25, 30, 50);
+    if(state.inputs.B) { ctx.fillStyle='red'; ctx.fillRect(state.carX-15, state.carY+20, 5, 5); ctx.fillRect(state.carX+10, state.carY+20, 5, 5); }
+}
+
+const bind = (id, k) => {
+    const el = document.getElementById(id);
+    el.onmousedown = el.ontouchstart = () => state.inputs[k] = true;
+    el.onmouseup = el.onmouseleave = el.ontouchend = () => state.inputs[k] = false;
+};
+bind('left','L'); bind('right','R'); bind('gas','G'); bind('brake','B');
+init();
+</script>
+</body>
+</html>
